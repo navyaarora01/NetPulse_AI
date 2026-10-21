@@ -1,0 +1,129 @@
+name: netpulse
+x-app: &app
+  image: netpulse:local
+  build: .
+  env_file:
+    - path: .env
+      required: false
+  environment: &app-env
+    DATABASE_URL: postgres://netpulse:netpulse@postgres:5432/netpulse?sslmode=disable
+    REDIS_ADDR: redis:6379
+    KAFKA_BROKERS: kafka:9092
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 40s
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: '3'}
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment: {POSTGRES_USER: netpulse, POSTGRES_PASSWORD: netpulse, POSTGRES_DB: netpulse}
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck: {test: [CMD-SHELL, 'pg_isready -U netpulse -d netpulse'], interval: 5s, timeout: 3s, retries: 20}
+    restart: unless-stopped
+  redis:
+    image: redis:7.4.5-alpine
+    command: [redis-server, --appendonly, 'yes', --maxmemory, 128mb, --maxmemory-policy, allkeys-lru]
+    volumes: [redis-data:/data]
+    healthcheck: {test: [CMD, redis-cli, ping], interval: 5s, timeout: 3s, retries: 10}
+    restart: unless-stopped
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_LOG_RETENTION_HOURS: 24
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes: [kafka-data:/var/lib/kafka/data]
+    healthcheck: {test: [CMD-SHELL, '/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null'], interval: 10s, timeout: 10s, retries: 20, start_period: 20s}
+    restart: unless-stopped
+  kafka-init:
+    image: apache/kafka:3.9.1
+    depends_on: {kafka: {condition: service_healthy}}
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        for topic in network-telemetry network-telemetry-dlq incident-events incident-analysis-requests incident-analysis-dlq; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1 --config retention.ms=86400000
+        done
+    restart: 'no'
+  migrate:
+    <<: *app
+    command: [/app/migrate]
+    depends_on: {postgres: {condition: service_healthy}}
+    restart: 'no'
+  api:
+    <<: *app
+    command: [/app/api]
+    ports: ['127.0.0.1:8080:8080']
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      kafka-init: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    healthcheck: {test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/readyz'], interval: 10s, timeout: 5s, retries: 10}
+  worker:
+    <<: *app
+    command: [/app/worker]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      kafka-init: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    healthcheck: {test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8081/readyz'], interval: 10s, timeout: 5s, retries: 10}
+  simulator:
+    <<: *app
+    profiles: [demo]
+    entrypoint: [/app/simulator]
+    command: [-url, 'http://api:8080']
+    depends_on: {api: {condition: service_healthy}}
+    restart: 'no'
+  web:
+    image: netpulse-web:local
+    build: ./web
+    ports: ['127.0.0.1:5173:8080']
+    depends_on: {api: {condition: service_healthy}}
+    healthcheck: {test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/'], interval: 10s, timeout: 3s, retries: 10}
+    restart: unless-stopped
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.retention.time=7d]
+    volumes: ['./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro', prometheus-data:/prometheus]
+    ports: ['127.0.0.1:9090:9090']
+    restart: unless-stopped
+  grafana:
+    image: grafana/grafana:12.1.1
+    environment: {GF_SECURITY_ADMIN_USER: admin, GF_SECURITY_ADMIN_PASSWORD: local-demo-change-me, GF_USERS_ALLOW_SIGN_UP: 'false'}
+    volumes: ['./deploy/grafana/provisioning:/etc/grafana/provisioning:ro', './deploy/grafana/dashboard.json:/var/lib/grafana/dashboards/netpulse.json:ro', grafana-data:/var/lib/grafana]
+    ports: ['127.0.0.1:3000:3000']
+    depends_on: [prometheus]
+    restart: unless-stopped
+  integration:
+    image: golang:1.27.1-alpine
+    profiles: [test]
+    working_dir: /src
+    volumes: ['.:/src', go-test-cache:/go]
+    environment:
+      DATABASE_URL: postgres://netpulse:netpulse@postgres:5432/netpulse_test?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      REDIS_ADDR: redis:6379
+      GOCACHE: /go/build-cache
+    command: [go, test, -tags=integration, -count=1, -v, ./tests/integration/...]
+    depends_on: {kafka-init: {condition: service_completed_successfully}, postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+volumes:
+  postgres-data:
+  redis-data:
+  kafka-data:
+  prometheus-data:
+  grafana-data:
+  go-test-cache:

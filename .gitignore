@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+.tools/
+node_modules/
+dist/
+coverage*
+*.test
+*.log
+.DS_Store
+credentials*.json
+bin/
