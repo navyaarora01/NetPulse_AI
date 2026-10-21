@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package*.json .npmrc ./
 RUN npm ci
 COPY . .
+ARG VITE_SNAPSHOT_MODE=false
 RUN npm run build
 FROM nginxinc/nginx-unprivileged:1.28-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf

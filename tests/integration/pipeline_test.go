@@ -112,8 +112,23 @@ func TestTransactionalLifecycle(t *testing.T) {
 		}
 	}
 	list, err = s.Incidents(ctx, database.Filter{Device: d.ID, From: at.Add(-time.Hour), To: time.Now().Add(time.Hour), Limit: 20})
-	if err != nil || len(list) != 1 {
-		t.Fatal("cooldown failed", err)
+	if err != nil {
+		t.Fatal("cooldown query failed", err)
+	}
+	// Health transitions can independently trigger an instability incident.
+	// Cooldown suppresses only another incident of the same device/type.
+	latencyIncidents := 0
+	for _, incident := range list {
+		if incident.Type != "high_latency" {
+			continue
+		}
+		latencyIncidents++
+		if incident.ID != i.ID || incident.Status != "resolved" || incident.Count != 2 {
+			t.Fatalf("cooldown changed the resolved latency incident: %+v", incident)
+		}
+	}
+	if latencyIncidents != 1 {
+		t.Fatalf("cooldown created %d latency incidents; expected 1", latencyIncidents)
 	}
 	latest, _ := s.Device(ctx, d.ID)
 	old := event(d, at.Add(-time.Hour), 500)

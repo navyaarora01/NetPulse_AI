@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { request, setToken, stamp } from "./api.js";
 
+const readOnly = import.meta.env.VITE_SNAPSHOT_MODE === "true";
+
 function Badge({ value }) {
   return (
     <span className={`badge ${value}`}>{value?.replaceAll("_", " ")}</span>
@@ -38,7 +40,9 @@ export function Chart({ data, field, unit, color = "#5bdfbc" }) {
     <div className="chart">
       <div className="chart-value">
         {values.at(-1).toFixed(1)} <small>{unit}</small>
-        <span>Latest minute average</span>
+        <span>
+          {readOnly ? "Last captured minute average" : "Latest minute average"}
+        </span>
       </div>
       <svg
         viewBox="0 0 700 170"
@@ -128,6 +132,13 @@ function IncidentTable({ items, open }) {
   );
 }
 export default function App() {
+  const [snapshot, setSnapshot] = useState(null);
+  useEffect(() => {
+    if (readOnly)
+      request("/snapshot")
+        .then(setSnapshot)
+        .catch(() => {});
+  }, []);
   const [view, setView] = useState("Overview"),
     [devices, setDevices] = useState([]),
     [incidents, setIncidents] = useState([]),
@@ -170,6 +181,7 @@ export default function App() {
   }, [deviceOffset, offset, status, severity]);
   useEffect(() => {
     refresh();
+    if (readOnly) return;
     const timer = setInterval(refresh, 5000);
     return () => clearInterval(timer);
   }, [refresh]);
@@ -193,7 +205,7 @@ export default function App() {
     };
     setTelemetry([]);
     load();
-    const timer = setInterval(load, 5000);
+    const timer = readOnly ? null : setInterval(load, 5000);
     return () => {
       live = false;
       controller.abort();
@@ -276,8 +288,16 @@ export default function App() {
         </nav>
         <div className="sidebar-bottom">
           <span className={`dot ${error ? "red" : ""}`} />
-          {error ? "Connection needs attention" : "Polling every 5 seconds"}
-          <small>Kafka telemetry pipeline · v1</small>
+          {error
+            ? "Connection needs attention"
+            : readOnly
+              ? "Captured telemetry snapshot"
+              : "Polling every 5 seconds"}
+          <small>
+            {readOnly
+              ? "Explore the recorded network state"
+              : "Kafka telemetry pipeline · v1"}
+          </small>
         </div>
       </aside>
       <main>
@@ -287,7 +307,8 @@ export default function App() {
           </div>
           <div className="header-right">
             <span className="live">
-              <Radio size={13} /> {error ? "DISCONNECTED" : "API CONNECTED"}
+              <Radio size={13} />{" "}
+              {error ? "DISCONNECTED" : readOnly ? "SNAPSHOT" : "API CONNECTED"}
             </span>
             <span className="avatar">NP</span>
           </div>
@@ -299,9 +320,13 @@ export default function App() {
               <h1>{view === "Overview" ? "Your network, in focus." : view}</h1>
               <p className="subtitle">
                 {view === "Overview"
-                  ? "Real-time health, emerging incidents, and context to act."
+                  ? readOnly
+                    ? "Captured network health, telemetry, and incident history."
+                    : "Real-time health, emerging incidents, and context to act."
                   : view === "Devices"
-                    ? "Monitor your devices and explore their latest telemetry."
+                    ? readOnly
+                      ? "Explore device health and telemetry from the recorded session."
+                      : "Monitor your devices and explore their latest telemetry."
                     : view === "Incidents"
                       ? "Investigate deterministic detections with advisory AI context."
                       : "Run controlled scenarios through the real ingestion pipeline."}
@@ -311,27 +336,38 @@ export default function App() {
               <RefreshCw size={15} /> Refresh
             </button>
           </div>
+          {readOnly && (
+            <p className="subtitle" role="status">
+              Captured demo · Read-only. Telemetry recorded through{" "}
+              {snapshot?.latest_telemetry_at
+                ? new Date(snapshot.latest_telemetry_at).toLocaleString()
+                : "the last local session"}
+              . This data does not update live.
+            </p>
+          )}
           {error && (
             <div role="alert" className="error">
               <strong>Unable to refresh:</strong> {error}
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  setToken(auth);
-                  setAuth("");
-                  refresh();
-                }}
-              >
-                <label htmlFor="token">API token, if required</label>
-                <input
-                  id="token"
-                  type="password"
-                  value={auth}
-                  onChange={(e) => setAuth(e.target.value)}
-                  autoComplete="off"
-                />
-                <button>Connect</button>
-              </form>
+              {!readOnly && (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    setToken(auth);
+                    setAuth("");
+                    refresh();
+                  }}
+                >
+                  <label htmlFor="token">API token, if required</label>
+                  <input
+                    id="token"
+                    type="password"
+                    value={auth}
+                    onChange={(e) => setAuth(e.target.value)}
+                    autoComplete="off"
+                  />
+                  <button>Connect</button>
+                </form>
+              )}
             </div>
           )}
           {loading ? (
@@ -397,14 +433,18 @@ export default function App() {
                     <section className="panel">
                       <div className="panel-heading">
                         <h3>Latency</h3>
-                        <span>LAST 24 HOURS</span>
+                        <span>
+                          {readOnly ? "CAPTURED SESSION" : "LAST 24 HOURS"}
+                        </span>
                       </div>
                       <Chart data={telemetry} field="latency_ms" unit="ms" />
                     </section>
                     <section className="panel">
                       <div className="panel-heading">
                         <h3>Packet loss</h3>
-                        <span>LAST 24 HOURS</span>
+                        <span>
+                          {readOnly ? "CAPTURED SESSION" : "LAST 24 HOURS"}
+                        </span>
                       </div>
                       <Chart
                         data={telemetry}
@@ -591,7 +631,11 @@ export default function App() {
                         ))}
                       </select>
                     </label>
-                    <span>Created in the last 24 hours</span>
+                    <span>
+                      {readOnly
+                        ? "All incidents in the captured session"
+                        : "Created in the last 24 hours"}
+                    </span>
                   </div>
                   <section className="panel">
                     <IncidentTable items={incidents} open={inspect} />
@@ -615,7 +659,37 @@ export default function App() {
                   </div>
                 </>
               )}
-              {view === "Demo guide" && (
+              {view === "Demo guide" && readOnly && (
+                <section className="panel demo">
+                  <span className="badge online">CAPTURED DEMO</span>
+                  <h2>Explore a network incident from signal to recovery.</h2>
+                  <p>
+                    This dashboard contains measurements recorded from ten
+                    simulated routers. It runs independently of the original
+                    application.
+                  </p>
+                  <h3>1. Explore the devices</h3>
+                  <p>
+                    Open Devices and select a router to compare its latency and
+                    packet loss across the captured session.
+                  </p>
+                  <h3>2. Inspect incident history</h3>
+                  <p>
+                    Open Incidents to inspect the latency, CPU, and packet-loss
+                    detections. Use the severity and status filters to explore
+                    the recorded outcomes.
+                  </p>
+                  <h3>3. Understand the pipeline</h3>
+                  <p>
+                    The original application sends simulated router measurements
+                    through a Go API and Kafka. A worker stores telemetry in
+                    PostgreSQL and applies deterministic detection rules. This
+                    hosted snapshot preserves those results; it does not run the
+                    backend or generate new events.
+                  </p>
+                </section>
+              )}
+              {view === "Demo guide" && !readOnly && (
                 <section className="panel demo">
                   <span className="badge online">LOCAL DEVELOPMENT</span>
                   <h2>See an incident from signal to recovery.</h2>
@@ -657,10 +731,15 @@ export default function App() {
           <footer>
             NETPULSE AI{" "}
             <span>
-              {updated
-                ? `Last refreshed ${updated.toLocaleTimeString()}`
-                : "Awaiting first response"}{" "}
-              · All data from your API
+              {readOnly
+                ? "Recorded session · Read-only snapshot"
+                : updated
+                  ? `Last refreshed ${updated.toLocaleTimeString()}`
+                  : "Awaiting first response"}{" "}
+              ·{" "}
+              {readOnly
+                ? "Data from the NetPulse local demo"
+                : "All data from your API"}
             </span>
           </footer>
         </div>
@@ -723,18 +802,22 @@ export default function App() {
             </dl>
             <Chart data={detailTelemetry} field="latency_ms" unit="ms" />
             <div className="actions">
-              <button
-                disabled={busy || detail.status !== "open"}
-                onClick={() => action("acknowledge")}
-              >
-                Acknowledge
-              </button>
-              <button
-                disabled={busy || detail.status === "resolved"}
-                onClick={() => action("resolve")}
-              >
-                Resolve incident
-              </button>
+              {!readOnly && (
+                <button
+                  disabled={busy || detail.status !== "open"}
+                  onClick={() => action("acknowledge")}
+                >
+                  Acknowledge
+                </button>
+              )}
+              {!readOnly && (
+                <button
+                  disabled={busy || detail.status === "resolved"}
+                  onClick={() => action("resolve")}
+                >
+                  Resolve incident
+                </button>
+              )}
               <button
                 className="secondary"
                 disabled={busy}
@@ -769,22 +852,26 @@ export default function App() {
                 </>
               ) : (
                 <p>
-                  Analysis is {detail.analysis_status}. Detection and incident
-                  actions remain available.
+                  Analysis is {detail.analysis_status}. Detection and incident{" "}
+                  {readOnly
+                    ? "history remains available."
+                    : "actions remain available."}
                 </p>
               )}
-              <button
-                className="secondary"
-                disabled={
-                  busy ||
-                  ["pending", "processing", "completed"].includes(
-                    detail.analysis_status,
-                  )
-                }
-                onClick={() => action("analyze")}
-              >
-                Request analysis
-              </button>
+              {!readOnly && (
+                <button
+                  className="secondary"
+                  disabled={
+                    busy ||
+                    ["pending", "processing", "completed"].includes(
+                      detail.analysis_status,
+                    )
+                  }
+                  onClick={() => action("analyze")}
+                >
+                  Request analysis
+                </button>
+              )}
             </section>
           </section>
         </div>
@@ -809,7 +896,7 @@ function DeviceIncidents({ id, open }) {
       }
     };
     load();
-    const t = setInterval(load, 5000);
+    const t = readOnly ? null : setInterval(load, 5000);
     return () => {
       live = false;
       clearInterval(t);
@@ -818,7 +905,11 @@ function DeviceIncidents({ id, open }) {
   return (
     <section className="panel">
       <div className="panel-heading">
-        <h3>Active incidents · last 24 hours</h3>
+        <h3>
+          {readOnly
+            ? "Active incidents · captured session"
+            : "Active incidents · last 24 hours"}
+        </h3>
       </div>
       {error ? (
         <p role="alert">{error}</p>

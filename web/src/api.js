@@ -3,6 +3,10 @@ export function setToken(value) {
   token = value;
 }
 export async function request(path, options = {}) {
+  if (import.meta.env.VITE_SNAPSHOT_MODE === "true") {
+    const { requestSnapshot } = await import("./snapshot.js");
+    return requestSnapshot(path, options);
+  }
   const response = await fetch(`/api/v1${path}`, {
     ...options,
     headers: {

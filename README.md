@@ -2,10 +2,15 @@
 
 Real-time network observability with deterministic incident detection and optional AI-assisted investigation. Simulated routers send telemetry through a Go ingestion API and Kafka; a worker persists rolling metrics, detects anomalies, and updates a live-polling React dashboard.
 
-**Implementation status:** the application, local stack configuration, test suites and cloud deployment configuration are present. Unit tests and frontend checks can run independently of Docker. Full-stack and cloud verification are recorded separately in [docs/verification.md](docs/verification.md); neither is claimed deployed. The test results below refer to the recorded implementation run, not a new run during this documentation update.
+**Deployed demo:** [https://netpulse-ai-network-demo.swift-emu-6996.chatgpt.site](https://netpulse-ai-network-demo.swift-emu-6996.chatgpt.site)
+
+Anyone with the URL can explore this read-only snapshot of ten demo routers, telemetry charts and three incidents without a login. It is hosted independently and works while the developer's computer is off. Data is captured from the local session, not updated live; the Go/Kafka backend is not hosted there. Continued availability depends on the hosting service and the Site remaining published; indefinite uptime is not guaranteed. See [snapshot deployment and refresh instructions](docs/snapshot-deployment.md).
+
+**Implementation status:** the application and local Docker stack were run and verified on 21 October 2026. Backend checks, frontend checks, all four infrastructure integration tests, smoke checks and browser interaction checks passed. The public snapshot is deployed; a live cloud deployment of the backend remains unverified. See [docs/verification.md](docs/verification.md) for current results and the historical implementation record.
 
 ## Start here
 
+- [Public snapshot and deployment details](docs/snapshot-deployment.md)
 - [Use cases](#what-this-project-is-for)
 - [What has been implemented](#what-has-been-implemented)
 - [Recommended code-reading order](#how-to-understand-the-code-recommended-reading-order)
@@ -51,7 +56,7 @@ Memory, bandwidth and instability rules are also implemented, but there are no n
 | Operations | Containers, local orchestration, Prometheus metrics, Grafana provisioning and cloud deployment files | [docker-compose.yml](docker-compose.yml), [deploy](deploy) |
 | Quality | Go and frontend tests, integration test suite, OpenAPI and GitHub Actions | [tests/integration](tests/integration), [.github/workflows/ci.yml](.github/workflows/ci.yml) |
 
-**Implemented does not mean deployed or fully acceptance-tested.** The earlier implementation run recorded passing Go tests/build/vet, five frontend tests, frontend lint/build and dependency scans. Docker-backed tests, visual browser inspection and cloud deployment were not verified in that run. This README update does not rerun those checks or turn that historical record into a current result. See [the verification record](docs/verification.md).
+**Local verification does not establish production readiness.** The latest run includes Docker startup, real PostgreSQL/Kafka/Redis integration tests and Chromium dashboard checks. Cloud deployment and paid AI-provider calls remain unverified. See [the verification record](docs/verification.md) for the scope of the checks.
 
 ## How to understand the code: recommended reading order
 
